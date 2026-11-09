@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="tk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPS Panel — test wersiýasy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+</head>
+<body>
+  <!-- Giriş / hasaba alyş (#/login) -->
+  <div id="auth" class="auth" hidden></div>
+
+  <!-- Panel -->
+  <div id="app" class="app" hidden>
+    <aside class="sidebar" id="sidebar" aria-label="Esasy menýu">
+      <a class="brand" href="#/dashboard">
+        <span class="brand-logo"><img src="assets/logo.svg" alt="ASTU"></span>
+        <span class="brand-name">VPS</span>
+      </a>
+      <nav class="nav" id="nav"></nav>
+      <div class="sidebar-foot nav">
+        <a href="#/admin" data-route="admin">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/></svg>
+          Admin paneli
+        </a>
+        <a href="#/login">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l-5-5 5-5M5 12h12"/></svg>
+          Çykmak
+        </a>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="topbar">
+        <div style="display:flex;align-items:center;gap:8px">
+          <button type="button" class="btn btn-ghost btn-icon menu-toggle" id="menuToggle" aria-label="Menýuny aç">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <nav class="crumbs" id="crumbs" aria-label="Ýol"></nav>
+        </div>
+        <div class="top-actions">
+          <a class="balance-pill" href="#/billing" aria-label="Balans, doldurmak">
+            <span id="topBalance">0.00 TMT</span>
+            <span class="plus"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+          </a>
+          <label><span class="sr-only">Dil</span>
+            <select class="select" aria-label="Dil"><option>TM</option><option>RU</option><option>EN</option></select>
+          </label>
+          <button type="button" class="user-btn">
+            <span class="avatar">A</span><span class="name">aman.amanow</span>
+          </button>
+        </div>
+      </header>
+      <main id="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
