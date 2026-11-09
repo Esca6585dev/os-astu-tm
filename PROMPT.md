@@ -2,6 +2,8 @@
 
 Bu prompt AI kod kömekçisine (Claude Code we ş.m.) ýa-da developere berlende, şu repoda doly işleýän VPS hosting panelini gurmak üçin ýazyldy. `test/` papkasyndaky statik wersiýa dizaýnyň nusgasydyr: sahypalar, reňkler, tekstler we hereketler şondan alynýar.
 
+> **Ýagdaý (2026-11-09):** taslama ýazyldy: `api/`, `web/`, `deploy/`, `docs/PROXMOX.md`. Prompt bilen tapawutlar: job navbaty Redis/asynq däl-de PostgreSQL-de; JWT-iň deregine httpOnly sessiýa cookie (DB-de heş); frontend Tailwind däl-de `test/` dizaýnynyň CSS-i bilen ýazyldy.
+
 ---
 
 ## 1. Maksat

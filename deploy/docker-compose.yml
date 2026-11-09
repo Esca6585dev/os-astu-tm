@@ -1,0 +1,59 @@
+# os.astu.tm — ähli hyzmatlar. Işletmek:
+#   cd deploy && cp .env.example .env && (gizlin maglumatlary dolduryň) && docker compose up -d --build
+name: os-astu-tm
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vps
+      POSTGRES_USER: vps
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerek}
+      TZ: Asia/Ashgabat
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vps -d vps"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: ../api
+    restart: unless-stopped
+    command: ["server"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://vps:${POSTGRES_PASSWORD}@postgres:5432/vps?sslmode=disable
+      HTTP_ADDR: ":8080"
+    depends_on:
+      postgres: { condition: service_healthy }
+    ports:
+      - "127.0.0.1:8080:8080"   # diňe nginx üçin
+    volumes:
+      - ./certs:/certs:ro         # PVE_CA_FILE=/certs/pve-root-ca.pem (islege görä)
+
+  worker:
+    build: ../api
+    restart: unless-stopped
+    command: ["worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://vps:${POSTGRES_PASSWORD}@postgres:5432/vps?sslmode=disable
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./certs:/certs:ro
+
+  web:
+    build:
+      context: ../web
+      args:
+        API_URL: http://api:8080
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "127.0.0.1:3000:3000"   # diňe nginx üçin
+
+volumes:
+  pgdata:

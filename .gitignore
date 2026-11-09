@@ -1,0 +1,4 @@
+deploy/.env
+*.log
+/api/server
+/api/worker
