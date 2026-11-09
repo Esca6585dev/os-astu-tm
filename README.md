@@ -1,5 +1,5 @@
 # os.astu.tm — VPS hosting paneli
-
+https://claude.ai/artifact/XyUSg9BARVDudQtxgKdAVj#artboard-64a8125801c3
 os.telecom.tm ýaly VPS hosting paneli. Ulanyjy hasaba alynýar, balansyny görýär, tarif saýlap maşyn (VPS) açýar we oňa SSH bilen girýär. Töleg her sagat balansdan aýrylýar.
 
 ## Repo-da näme bar
