@@ -121,7 +121,7 @@
         <div class="card stat"><span class="label">Häzirki tutum</span><span class="value">${fmt(totalHourly())} <small>TMT / sag</small></span><span class="muted">Aýlyk çäk ${money(cap)}</span></div>
         <div class="card stat"><span class="label">Şu aý tutulan</span><span class="value">${money(used)}</span><span class="muted">Balans ≈ ${daysLeft()} gün ýeter</span></div>
       </section>
-      <div class="alert alert-warn">${svg(IC.alert)}<span>Balans 0 bolanda maşynlar awtomatik durdurylýar. 7 günden soň olar pozulýar.</span><a href="#/billing"><b>Balansy gör</b></a></div>
+      <div class="alert alert-warn">${svg(IC.alert)}<span>Balans 0 bolanda serwerler awtomatik öçürilýär. Balans doldurylanda olar gaýtadan açylýar.</span><a href="#/billing"><b>Balansy gör</b></a></div>
       <div class="split">
         <section class="card main-col">
           <div class="card-head"><h2>Maşynlarym</h2><a href="#/machines">Hemmesi →</a></div>

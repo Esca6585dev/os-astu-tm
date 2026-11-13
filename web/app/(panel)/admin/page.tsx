@@ -4,23 +4,23 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Badge, PageHead, useCrumbs, usePanel } from "@/components/Shell";
 import { Icon } from "@/components/icons";
-import { api, ApiError, dt, money, ramGB, tmt, type Image, type Plan, type Server, type User } from "@/lib/api";
+import { api, ApiError, dt, METHOD, money, ramGB, tmt, TOPUP_STATUS, type Image, type Plan, type Server, type Topup, type User } from "@/lib/api";
 
 type AUser = User & { servers: number; created_at: string };
-type Stats = { users: number; running_servers: number; servers: number; free_ips: number; total_ips: number;
+type Stats = { users: number; running_servers: number; servers: number; free_ips: number; total_ips: number; pending_topups: number;
   nodes: { id: number; name: string; vcpu: [number, number]; ram_mb: [number, number]; disk_gb: [number, number] }[] };
 type Node = { id: number; name: string; storage: string; bridge: string; max_vcpu: number; max_ram_mb: number; max_disk_gb: number; is_active: boolean };
 type Pool = { id: number; node: string; cidr: string; gateway: string; dns: string; total: number; free: number };
 type Audit = { id: number; actor: string; action: string; target: string; meta: Record<string, unknown>; ip: string; created_at: string };
 
-const TABS = ["Ulanyjylar", "Maşynlar", "Node-lar", "IP bloklary", "Obrazlar", "Tarifler", "Audit"] as const;
+const TABS = ["Doldurmalar", "Ulanyjylar", "Maşynlar", "Node-lar", "IP bloklary", "Obrazlar", "Tarifler", "Audit"] as const;
 
 export default function Admin() {
   useCrumbs("Admin paneli");
-  const { me } = usePanel();
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Ulanyjylar");
+  const { me, refresh } = usePanel();
+  const [tab, setTab] = useState<(typeof TABS)[number]>("Doldurmalar");
   const [stats, setStats] = useState<Stats | null>(null);
-  const loadStats = useCallback(() => api<Stats>("/admin/stats").then(setStats).catch(() => {}), []);
+  const loadStats = useCallback(() => { refresh(); return api<Stats>("/admin/stats").then(setStats).catch(() => {}); }, [refresh]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
   if (me.role !== "admin") return <p className="empty">Diňe administrator üçin.</p>;
@@ -43,8 +43,10 @@ export default function Admin() {
         <div className="alert alert-warn"><Icon name="alert" /><span>Maşyn döretmek üçin azyndan bir Proxmox node, bir IP blok we bir obraz goşuň (docs/PROXMOX.md).</span></div>
       )}
       <div className="tabs" role="tablist">
-        {TABS.map((t) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}
+        {TABS.map((t) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
+          {t}{t === "Doldurmalar" && !!stats?.pending_topups && <span className="badge badge-warn" style={{ marginLeft: 8 }}>{stats.pending_topups}</span>}</button>)}
       </div>
+      {tab === "Doldurmalar" && <TopupsTab onChange={loadStats} />}
       {tab === "Ulanyjylar" && <UsersTab onChange={loadStats} />}
       {tab === "Maşynlar" && <ServersTab />}
       {tab === "Node-lar" && <NodesTab onChange={loadStats} />}
@@ -59,6 +61,65 @@ export default function Admin() {
 function useErr() {
   const { toast } = usePanel();
   return (e: unknown) => toast(e instanceof ApiError ? e.message : "Ýalňyşlyk");
+}
+
+function TopupsTab({ onChange }: { onChange: () => void }) {
+  const { toast } = usePanel();
+  const onErr = useErr();
+  const [status, setStatus] = useState("pending");
+  const [list, setList] = useState<Topup[] | null>(null);
+  const [busy, setBusy] = useState(0);
+  const load = useCallback(() => api<Topup[]>(`/admin/topups?limit=100&status=${status}`).then(setList).catch(() => setList([])), [status]);
+  useEffect(() => { setList(null); load(); }, [load]);
+  // Täze haýyşlar özi görünsin
+  useEffect(() => { const i = setInterval(() => { load(); onChange(); }, 30000); return () => clearInterval(i); }, [load, onChange]);
+
+  async function approve(t: Topup) {
+    if (!window.confirm(`${t.full_name || t.user_email} (${t.account_no}) balansyna ${money(t.amount)} goşulsynmy?\n\nUsul: ${METHOD[t.method]}\nÇek / töleg belgisi: ${t.reference}\n\nTölegiň hakykatdan gelendigini barladyňyzmy?`)) return;
+    setBusy(t.id);
+    try { await api(`/admin/topups/${t.id}/approve`, { method: "POST", body: {} }); toast(`${t.account_no}: +${tmt(t.amount)} TMT goşuldy`); load(); onChange(); }
+    catch (e) { onErr(e); } finally { setBusy(0); }
+  }
+  async function reject(t: Topup) {
+    const note = window.prompt(`${t.account_no} · ${money(t.amount)} haýyşy ret edilýär.\nSebäbini ýazyň (ulanyjy görer):`, "Töleg tapylmady");
+    if (note === null) return;
+    setBusy(t.id);
+    try { await api(`/admin/topups/${t.id}/reject`, { method: "POST", body: { note } }); toast("Haýyş ret edildi"); load(); onChange(); }
+    catch (e) { onErr(e); } finally { setBusy(0); }
+  }
+
+  return (
+    <section className="card">
+      <div className="toolbar">
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>Ýagdaýy
+          <select className="select" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="pending">Garaşylýan</option><option value="approved">Tassyklanan</option><option value="rejected">Ret edilen</option>
+            <option value="cancelled">Ýatyrylan</option><option value="all">Hemmesi</option>
+          </select></label>
+        <span className="muted">Tölegiň bank hasabyna ýa-da kassa gelendigini barlap, soňra tassyklaň. Her karar audit žurnalyna ýazylýar.</span>
+      </div>
+      <div className="table-wrap"><table style={{ minWidth: 960 }}>
+        <thead><tr><th>Wagty</th><th>Ulanyjy</th><th className="num">Möçberi</th><th>Usul</th><th>Çek / töleg belgisi</th><th>Ýagdaýy</th><th><span className="sr-only">Hereketler</span></th></tr></thead>
+        <tbody>{list === null ? <tr><td colSpan={7} className="empty">Ýüklenýär…</td></tr> :
+          list.length === 0 ? <tr><td colSpan={7} className="empty">{status === "pending" ? "Garaşylýan haýyş ýok" : "Haýyş ýok"}</td></tr> : list.map((t) => {
+            const [label, cls] = TOPUP_STATUS[t.status] ?? [t.status, "badge-off"];
+            return (
+              <tr key={t.id}>
+                <td className="muted" style={{ whiteSpace: "nowrap" }}>{dt(t.created_at)}</td>
+                <td><b>{t.full_name || t.user_email}</b><div className="muted" style={{ fontSize: 12 }}>{t.account_no} · {t.user_email} · balans {tmt(t.user_balance ?? 0)}</div></td>
+                <td className="num" style={{ fontWeight: 700, fontSize: 15 }}>{tmt(t.amount)}</td>
+                <td>{METHOD[t.method]}</td>
+                <td><span className="mono">{t.reference}</span>{t.comment && <div className="muted" style={{ fontSize: 12 }}>{t.comment}</div>}</td>
+                <td><span className={`badge ${cls}`}>{label}</span>{t.admin_note && <div className="muted" style={{ fontSize: 12 }}>{t.admin_note}</div>}</td>
+                <td className="num" style={{ whiteSpace: "nowrap" }}>{t.status === "pending" && <>
+                  <button type="button" className="btn" style={{ minHeight: 34 }} disabled={busy === t.id} onClick={() => approve(t)}><Icon name="check" small sw={2.4} />Tassykla</button>{" "}
+                  <button type="button" className="btn btn-ghost" style={{ minHeight: 34 }} disabled={busy === t.id} onClick={() => reject(t)}>Ret et</button></>}</td>
+              </tr>
+            );
+          })}</tbody>
+      </table></div>
+    </section>
+  );
 }
 
 function UsersTab({ onChange }: { onChange: () => void }) {
@@ -116,7 +177,7 @@ function UsersTab({ onChange }: { onChange: () => void }) {
         <label className="field">Bellik (çek ýa-da töleg belgisi)<textarea className="textarea" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="mysal: çek №2232, nagt" style={{ fontFamily: "var(--font)" }} /></label>
         <div style={{ display: "flex", justifyContent: "space-between" }}><span className="muted">Täze balans</span><b>{who ? money(newBal) : "—"}</b></div>
         <button type="button" className="btn btn-lg" disabled={!who || !note.trim() || !(Number(amount) > 0)} onClick={topup}>Tassykla we goş</button>
-        <span className="hint">Her doldurma audit žurnalyna ýazylýar. Saklanan maşynlar bir minudyň dowamynda awtomatik başlaýar.</span>
+        <span className="hint">Her doldurma audit žurnalyna ýazylýar. Öçürilen serwerler bir minudyň dowamynda awtomatik açylýar.</span>
       </section>
     </div>
   );

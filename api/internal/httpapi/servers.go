@@ -84,6 +84,11 @@ func (a *API) ownServer(c *fiber.Ctx) (Server, error) {
 	if err != nil {
 		return Server{}, err
 	}
+	return a.ownServerByID(c, id)
+}
+
+// ownServerByID ulanyja degişli maşyny gaýtarýar (başga ulanyjynyňky bolsa 404).
+func (a *API) ownServerByID(c *fiber.Ctx, id int64) (Server, error) {
 	s, err := scanServer(a.DB.QueryRow(c.Context(), serverSelect+` WHERE s.id=$1 AND s.user_id=$2 AND s.status <> 'deleted'`, id, userOf(c).ID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s, E(404, "not_found", "Maşyn tapylmady")
@@ -164,7 +169,7 @@ func (a *API) createServer(c *fiber.Ctx) error {
 	}
 	var committed int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(p.price_monthly),0) FROM servers s JOIN plans p ON p.id=s.plan_id
-		WHERE s.user_id=$1 AND s.status IN ('provisioning','running','stopped','reinstalling')`, u.ID).Scan(&committed); err != nil {
+		WHERE s.user_id=$1 AND s.status IN ('provisioning','running','stopped','reinstalling','restoring')`, u.ID).Scan(&committed); err != nil {
 		return err
 	}
 	need := (committed + price) * a.Cfg.PVEMinCreditHrs / billing.HoursPerMonth
@@ -267,7 +272,7 @@ func (a *API) serverAction(c *fiber.Ctx) error {
 		return err
 	}
 	if s.Status == "suspended" {
-		return E(402, "suspended", "Maşyn balans gutaranlygy sebäpli saklanýar. Balansy dolduryň.")
+		return errSuspended
 	}
 	if s.Busy {
 		return E(409, "busy", "Maşynda başga amal ýerine ýetirilýär. Biraz garaşyň.")

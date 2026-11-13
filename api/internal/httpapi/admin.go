@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"errors"
 	"math"
 	"net/netip"
 	"strings"
@@ -14,16 +13,18 @@ import (
 func (a *API) adminStats(c *fiber.Ctx) error {
 	ctx := c.Context()
 	out := fiber.Map{}
-	var users, running, servers, freeIPs, totalIPs int64
+	var users, running, servers, freeIPs, totalIPs, pendingTopups int64
 	if err := a.DB.QueryRow(ctx, `SELECT
 		(SELECT count(*) FROM users),
 		(SELECT count(*) FROM servers WHERE status='running'),
 		(SELECT count(*) FROM servers WHERE deleted_at IS NULL),
 		(SELECT count(*) FROM ip_addresses WHERE server_id IS NULL AND NOT reserved),
-		(SELECT count(*) FROM ip_addresses)`).Scan(&users, &running, &servers, &freeIPs, &totalIPs); err != nil {
+		(SELECT count(*) FROM ip_addresses),
+		(SELECT count(*) FROM topup_requests WHERE status='pending')`).Scan(&users, &running, &servers, &freeIPs, &totalIPs, &pendingTopups); err != nil {
 		return err
 	}
 	out["users"], out["running_servers"], out["servers"], out["free_ips"], out["total_ips"] = users, running, servers, freeIPs, totalIPs
+	out["pending_topups"] = pendingTopups
 
 	rows, err := a.DB.Query(ctx, `
 		SELECT n.id, n.name, n.max_vcpu, n.max_ram_mb, n.max_disk_gb,
@@ -150,15 +151,8 @@ func (a *API) adminTopup(c *fiber.Ctx) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var bal int64
-	err = tx.QueryRow(ctx, `UPDATE users SET balance=balance+$2, low_balance_notified_at=NULL WHERE id=$1 RETURNING balance`, id, tenge).Scan(&bal)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return E(404, "not_found", "Ulanyjy tapylmady")
-	} else if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO transactions (user_id, type, amount, balance_after, admin_id, note) VALUES ($1,$2,$3,$4,$5,$6)`,
-		id, in.Type, tenge, bal, userOf(c).ID, in.Note); err != nil {
+	bal, _, err := credit(ctx, tx, id, tenge, in.Type, userOf(c).ID, in.Note)
+	if err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

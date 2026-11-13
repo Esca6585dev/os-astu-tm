@@ -44,11 +44,15 @@ iface vmbr0 inet static
 
 ## 3. Firewall
 
-Panel her VM-e IP/MAC filtrini we çykýan 25-nji port (SMTP) bloklaýan düzgüni goýýar (`PVE_FIREWALL=true`). Bu düzgünler diňe Datacenter firewall açyk bolanda işleýär:
+Panel her VM-e IP/MAC filtrini we çykýan 25-nji port (SMTP) bloklaýan düzgüni goýýar (`PVE_FIREWALL=true`). Ulanyjylar panelde öz düzgünlerini hem goýýarlar (portlary açmak ýa-da ýapmak); panel olary VM firewall-yna ýazýar. Bu düzgünler diňe Datacenter firewall açyk bolanda işleýär:
 
 1. Datacenter → Firewall → **Options**: `Firewall = Yes`.
 2. Öňünden **8006 we 22 portlaryna admin IP-lerden** rugsat beriji düzgün goşuň, ýogsa öz-özüňizi bloklarsyňyz.
 3. Node → Firewall → Options-da hem firewall açyk bolmaly.
+
+### Bekaplar üçin storage
+
+Ulanyjy bekaplary (`vzdump`) `.env`-däki `PVE_BACKUP_STORAGE` storage-a ýazylýar (ilkibada `local`). Bu storage-da **Backup** content açyk bolmaly: Datacenter → Storage → `local` → Edit → Content → `VZDump backup file`. Ulgam diskini doldurmazlyk üçin aýratyn disk ýa-da NFS/PBS storage goşup, şony görkeziň. Bir maşyn üçin iň köp bekap sany `BACKUP_LIMIT` (3).
 
 ## 4. Cloud-init şablonlary (obrazlar)
 
@@ -96,13 +100,13 @@ Bellikler:
 **Proxmox VE 8:**
 
 ```bash
-pveum role add PanelVM -privs "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.Monitor Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
+pveum role add PanelVM -privs "VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.Monitor Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
 ```
 
 **Proxmox VE 9** (`VM.Monitor` aýryldy, guest-agent arkaly parol çalyşmak üçin `VM.GuestAgent.Unrestricted` gerek):
 
 ```bash
-pveum role add PanelVM -privs "VM.Allocate VM.Audit VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.GuestAgent.Unrestricted Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
+pveum role add PanelVM -privs "VM.Allocate VM.Audit VM.Backup VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Cloudinit VM.Config.Disk VM.Config.HWType VM.Config.Memory VM.Config.Network VM.Config.Options VM.PowerMgmt VM.GuestAgent.Unrestricted Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
 ```
 
 Soňra:
@@ -159,6 +163,8 @@ nginx üçin `deploy/nginx.conf` faýlyny `/etc/nginx/sites-available/` papkasyn
 | `x509: certificate` | `PVE_CA_FILE` ýok ýa-da `PVE_URL`-daky at sertifikatdaky bilen gabat gelmeýär |
 | `qemu-guest-agent ... not running` | Şablonda guest agent ýok (4-nji ädim), parol çalşyp bolmaýar |
 | `storage ... does not exist` | Node sazlamasyndaky storage ady Proxmox-daky bilen deň däl |
+| Bekap: `403 ... VM.Backup` | Rol öň döredilen bolsa, hukugy goşuň: `pveum role modify PanelVM -append 1 -privs VM.Backup` |
+| Bekap: `does not support backup content` | `PVE_BACKUP_STORAGE` storage-da **Backup** content açyk däl (3-nji ädim, «Bekaplar üçin storage») |
 | Maşyn işleýär, ýöne tor ýok | Datacenter firewall-da `ipfilter` açyk, ýöne IP blogy dogry bridge-de däl, ýa-da Telekom blogy node-a gönükdirilmedik |
 
 ## 9. Proxmox-syz synag

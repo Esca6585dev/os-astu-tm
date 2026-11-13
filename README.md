@@ -10,7 +10,7 @@ os.telecom.tm ýaly VPS hosting paneli. Ulanyjy hasaba alynýar, balansyny gör�
 | `web/` | Next.js 15 paneli: ulanyjy we admin sahypalary |
 | `deploy/` | `docker-compose.yml`, `.env.example`, `nginx.conf` |
 | `docs/PROXMOX.md` | **Proxmox serwerini taýýarlamak we paneli birikdirmek: ädimme-ädim** |
-| `scripts/smoke.sh` | Doly synag (39 barlag): hasaba alyş → maşyn → amallar → billing → suspend → pozmak |
+| `scripts/smoke.sh` | Doly synag (76 barlag): hasaba alyş → maşyn → amallar → firewall → bekap → billing → öçürmek → balans doldurmak → pozmak |
 | `test/` | Ilkinji statik dizaýn nusgasy (HTML/CSS/JS) |
 | `PROMPT.md` | Taslamanyň doly tehniki tabşyrygy |
 
@@ -37,7 +37,11 @@ cd web && npm install && npm run dev          # http://localhost:3000
 - **Billing:** ähli pul teňňede (`BIGINT`). Her sagat `round(aýlyk × n / 720) − tutulan` tutulýar, ýagny aýda aýlyk bahadan köp tutulmaýar. `server_usage (server_id, hour)` açary bir sagadyň iki gezek tutulmagynyň öňüni alýar.
 - **Job navbaty:** PostgreSQL-de (`jobs` tablisasy, `FOR UPDATE SKIP LOCKED`), Redis gerek däl. Bir maşynda bir wagtda diňe bir amal ýerine ýetirilýär.
 - **Proxmox:** API token; şablony doly klonlamak, cloud-init (IP, root parol, SSH açar), diski ulaltmak, tor tizligi (`rate`), VM firewall (ipfilter, 25-nji port ýapyk), parol qemu-guest-agent arkaly.
-- **Balans:** 0-dan aşak düşende maşynlar saklanýar, doldurylanda awtomatik başlaýar, 7 günden soň pozulýar. Email duýduryşlary iberilýär.
+- **Balans:** 0-dan aşak düşende serwerler öçürilýär (`suspended`, pul tutulmaýar) we balans doldurylanda awtomatik açylýar. Serwerler awtomatik pozulmaýar. Email duýduryşlary iberilýär.
+- **Balans doldurmak:** ulanyjy tölegi bank, kassa ýa-da kart arkaly geçirýär we panelde haýyş iberýär (möçber, usul, çek belgisi). Administrator «Admin paneli → Doldurmalar» bölüminde tassyklaýar ýa-da sebäbini ýazyp ret edýär. Tassyklananda balans şol pursat goşulýar. Rekwizitler `PAYMENT_INFO` arkaly balans sahypasynda görkezilýär.
+- **Bekaplar:** Proxmox `vzdump` (snapshot, zstd) `PVE_BACKUP_STORAGE` storage-a ýazylýar. Bir maşyn üçin iň köp `BACKUP_LIMIT` (3) bekap. Dikeltmek maşyny durdurýar, diski bekapdan gaýtarýar, firewall düzgünlerini täzeden goýýar we başladýar. Maşyn pozulanda onuň bekaplary hem pozulýar.
+- **Firewall:** ulanyjy her maşyn üçin gelýän trafigiň syýasatyny (hemmesine rugsat / diňe rugsat berlenler) we 50-ä çenli düzgüni (ugur, hereket, protokol, port, IP/CIDR) goýýar. Panel düzgünleri Proxmox VM firewall-yna ýazýar; çykýan 25-nji port hemişe ýapyk.
+- **IP salgylar:** ulanyjynyň ähli IP salgylary, maska, şlýuz, DNS we netplan sazlamasy.
 - **Howpsuzlyk:** argon2id, httpOnly sessiýa cookie, CSRF (`X-Requested-With`), rate limit, IDOR barlaglary we audit žurnaly.
 
 ## Statik dizaýn nusgasy (test/)

@@ -166,7 +166,7 @@ func (a *API) getBalance(c *fiber.Ctx) error {
 	if err := a.DB.QueryRow(c.Context(), `
 		SELECT COALESCE(sum(p.price_monthly),0), count(*)
 		FROM servers s JOIN plans p ON p.id=s.plan_id
-		WHERE s.user_id=$1 AND s.status IN ('provisioning','running','stopped','reinstalling')`, u.ID).Scan(&monthly, &servers); err != nil {
+		WHERE s.user_id=$1 AND s.status IN ('provisioning','running','stopped','reinstalling','restoring')`, u.ID).Scan(&monthly, &servers); err != nil {
 		return err
 	}
 	if err := a.DB.QueryRow(c.Context(), `
@@ -186,6 +186,7 @@ func (a *API) getBalance(c *fiber.Ctx) error {
 		"days_left":        days,
 		"billable_servers": servers,
 		"account_no":       u.Account,
+		"payment_info":     a.Cfg.PaymentInfo,
 	})
 }
 

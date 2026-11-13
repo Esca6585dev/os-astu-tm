@@ -26,7 +26,7 @@ export default function MachinePage() {
   // Amal dowam edýärkä ýagdaýy her 3 sekuntda soraýarys
   useEffect(() => {
     if (!s) return;
-    const i = setInterval(load, s.busy || ["provisioning", "reinstalling", "deleting"].includes(s.status) ? 3000 : 15000);
+    const i = setInterval(load, s.busy || ["provisioning", "reinstalling", "restoring", "deleting"].includes(s.status) ? 3000 : 15000);
     return () => clearInterval(i);
   }, [s, load]);
 
@@ -76,11 +76,14 @@ export default function MachinePage() {
           <button type="button" className="btn btn-ghost" disabled={locked || !["running", "stopped"].includes(s.status)}
             onClick={() => act(on ? "stop" : "start", undefined, on ? "Maşyn durdurylýar" : "Maşyn başladylýar")}><Icon name="power" small />{on ? "Durdur" : "Başlat"}</button>
           <button type="button" className="btn btn-ghost" disabled={locked || !on} onClick={() => act("reboot", undefined, "Maşyn täzeden ýüklenýär")}><Icon name="refresh" small />Täzeden ýükle</button>
+          <Link className="btn btn-ghost" href={`/backups?server=${s.id}`}><Icon name="backup" small />Bekaplar</Link>
+          <Link className="btn btn-ghost" href={`/firewall?server=${s.id}`}><Icon name="shield" small />Firewall</Link>
           <button type="button" className="btn btn-ghost" disabled title="noVNC konsoly soňky tapgyrda goşulýar"><Icon name="terminal" small />Konsol</button>
         </div>
       </div>
 
-      {s.status === "suspended" && <div className="alert alert-warn"><Icon name="alert" /><span>Maşyn balans gutaranlygy sebäpli saklanýar. Balans doldurylanda awtomatik başlar.</span><Link href="/billing"><b>Balans</b></Link></div>}
+      {s.status === "suspended" && <div className="alert alert-warn"><Icon name="alert" /><span>Balans gutaranlygy sebäpli serwer öçürildi. Balans doldurylanda awtomatik açylar.</span><Link href="/billing#doldur"><b>Balansy doldur</b></Link></div>}
+      {s.status === "restoring" && <div className="alert alert-info"><Icon name="backup" /><span>Maşyn bekapdan dikeldilýär. Bu birnäçe minut dowam edip biler.</span></div>}
       {s.status === "error" && <div className="alert alert-warn"><Icon name="alert" /><span>Maşyny döretmekde ýalňyşlyk boldy{s.last_job_error ? `: ${s.last_job_error}` : ""}. OS-i täzeden guruň ýa-da maşyny pozuň.</span></div>}
       {pw && (
         <div className="alert alert-info pw-box"><span>Täze root parol (diňe bir gezek görkezilýär): <b className="mono">{pw}</b></span>
@@ -140,7 +143,7 @@ export default function MachinePage() {
           <button type="button" className="btn btn-ghost" style={{ alignSelf: "flex-start" }} disabled={locked || !on} onClick={() => act("reset-password", undefined, "Parol täzelenýär")}>Täze parol döret</button>
           <hr style={{ border: 0, borderTop: "1px solid var(--border-soft)", width: "100%", margin: "4px 0" }} />
           <h2 className="step-title" style={{ color: "var(--danger)" }}>Maşyny pozmak</h2>
-          <p className="muted" style={{ margin: 0 }}>Maşyn we diski yzyna gaýtarylmazdan pozulýar. Tassyklamak üçin maşynyň adyny ýazyň.</p>
+          <p className="muted" style={{ margin: 0 }}>Maşyn, diski we ähli bekaplary yzyna gaýtarylmazdan pozulýar. Tassyklamak üçin maşynyň adyny ýazyň.</p>
           <input className="input mono" placeholder={s.hostname} value={confirmName} onChange={(e) => setConfirmName(e.target.value)} aria-label="Maşynyň ady" />
           <button type="button" className="btn btn-danger" style={{ alignSelf: "flex-start" }} disabled={s.busy || confirmName !== s.hostname} onClick={remove}><Icon name="trash" small />Maşyny poz</button>
         </section>

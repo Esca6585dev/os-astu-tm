@@ -86,9 +86,9 @@ Bu tarifler ilkinji migrasiýada `plans` tablisasyna seed edilýär. Admin panel
 - Her sagadyň başynda worker şuny bir DB tranzaksiýasynda edýär: `server_usage (server_id, hour)` setiri `ON CONFLICT DO NOTHING` bilen goşulýar. Setir täze bolsa, balans azaldylýar we `transactions`-a `charge` ýazgysy goşulýar. Şeýlelikde bir sagat iki gezek tutulmaýar.
 - Maşyn döretmek üçin balans azyndan 24 sagatlyk tutuma ýetmeli, ýetmese API `402` gaýtarýar.
 - Balans 24 sagatlyk tutumdan az galanda email duýduryşy iberilýär.
-- Balans 0-dan aşak düşende ulanyjynyň ähli maşynlary durdurylyp `suspended` ýagdaýyna geçýär. Balans doldurylanda olar awtomatik başlaýar.
-- 7 gün `suspended` bolup galan maşyn diski bilen pozulýar we IP boşadylýar. Mundan 2 gün öň duýduryş iberilýär.
-- MVP-de balansy diňe administrator elde doldurýar (bellik bilen, `audit_log`-a ýazylýar). Bank töleg şlýuzy soňky tapgyrda goşulýar.
+- Balans 0-dan aşak düşende ulanyjynyň ähli serwerleri öçürilip `suspended` ýagdaýyna geçýär (pul tutulmaýar). Balans doldurylanda olar awtomatik açylýar.
+- `suspended` serwerler awtomatik pozulmaýar: disk we IP balans doldurylýança saklanýar.
+- Balansy doldurmak: ulanyjy tölegi geçirip panelde haýyş iberýär (möçber, usul, çek belgisi), administrator tassyklaýar ýa-da ret edýär (`topup_requests`, `audit_log`). Administrator elde hem doldurup bilýär. Bank kartasy bilen onlaýn töleg soňky tapgyrda goşulýar.
 
 ## 6. Maglumat bazasy
 

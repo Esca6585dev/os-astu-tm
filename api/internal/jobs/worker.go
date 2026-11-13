@@ -79,7 +79,11 @@ func (w *Worker) claim(ctx context.Context) (job, error) {
 }
 
 func (w *Worker) process(ctx context.Context, j job) {
-	jctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	timeout := 30 * time.Minute
+	if j.Action == ActBackup || j.Action == ActRestore {
+		timeout = 4 * time.Hour // uly diskleriň bekaby uzak dowam edýär
+	}
+	jctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	log := slog.With("job", j.ID, "server", j.ServerID, "action", j.Action)
 	log.Info("job start")
@@ -159,12 +163,70 @@ func (w *Worker) spec(ctx context.Context, s srv, vmid int, password string) (hv
 	if s.IP == "" {
 		return hv.VMSpec{}, errors.New("maşyna IP berilmedik")
 	}
+	fw, err := LoadFirewall(ctx, w.DB, s.ID)
+	if err != nil {
+		return hv.VMSpec{}, err
+	}
 	return hv.VMSpec{
 		Node: s.Node, VMID: vmid, Name: s.Hostname, TemplateVMID: s.TemplateVMID,
 		Storage: s.Storage, Bridge: s.Bridge, Cores: s.Cores, MemoryMB: s.RAM, DiskGB: s.Disk,
 		BandwidthMbit: s.BW, IP: s.IP, Prefix: s.Prefix, Gateway: s.Gateway, DNS: s.DNS,
-		Password: password, SSHKeys: keys,
+		Password: password, SSHKeys: keys, Firewall: fw,
 	}, nil
+}
+
+type backupRow struct {
+	Volid   *string
+	Storage string
+	ImageID int64
+}
+
+func (w *Worker) backup(ctx context.Context, id, serverID int64) (backupRow, error) {
+	var b backupRow
+	err := w.DB.QueryRow(ctx, `SELECT volid, storage, image_id FROM backups WHERE id=$1 AND server_id=$2`, id, serverID).
+		Scan(&b.Volid, &b.Storage, &b.ImageID)
+	if err != nil {
+		return b, fmt.Errorf("bekap #%d: %w", id, err)
+	}
+	return b, nil
+}
+
+func (w *Worker) backupFailed(id int64, cause error) error {
+	_, _ = w.DB.Exec(context.Background(), `UPDATE backups SET status='error', error=$2, finished_at=now() WHERE id=$1`,
+		id, ShortError(cause.Error()))
+	return cause
+}
+
+// deleteBackups pozulýan maşynyň ähli bekap faýllaryny pozýar. Şowsuz bolsa, bekap
+// "error" ýagdaýynda galýar (admin görer), maşyny pozmak bolsa dowam edýär.
+func (w *Worker) deleteBackups(ctx context.Context, s srv) {
+	rows, err := w.DB.Query(ctx, `SELECT id, volid FROM backups WHERE server_id=$1 AND status <> 'deleted'`, s.ID)
+	if err != nil {
+		slog.Error("backups list", "server", s.ID, "err", err)
+		return
+	}
+	type b struct {
+		ID    int64
+		Volid *string
+	}
+	list, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (b, error) {
+		var x b
+		return x, r.Scan(&x.ID, &x.Volid)
+	})
+	if err != nil {
+		slog.Error("backups list", "server", s.ID, "err", err)
+		return
+	}
+	for _, x := range list {
+		if x.Volid != nil {
+			if err := w.HV.DeleteBackup(ctx, s.Node, *x.Volid); err != nil {
+				slog.Error("backup delete", "backup", x.ID, "err", err)
+				_ = w.backupFailed(x.ID, err)
+				continue
+			}
+		}
+		_, _ = w.DB.Exec(ctx, `UPDATE backups SET status='deleted', finished_at=now() WHERE id=$1`, x.ID)
+	}
 }
 
 func (w *Worker) handle(ctx context.Context, j job) error {
@@ -172,7 +234,7 @@ func (w *Worker) handle(ctx context.Context, j job) error {
 	if err != nil {
 		return fmt.Errorf("server load: %w", err)
 	}
-	if s.VMID == nil && j.Action != ActCreate && j.Action != ActDelete {
+	if s.VMID == nil && j.Action != ActCreate && j.Action != ActDelete && j.Action != ActBackupDelete {
 		return errors.New("maşynyň VMID-i ýok")
 	}
 
@@ -199,7 +261,7 @@ func (w *Worker) handle(ctx context.Context, j job) error {
 		if err := w.HV.Start(ctx, s.Node, *s.VMID); err != nil {
 			return err
 		}
-		return w.setStatus(ctx, s.ID, "running", ", suspended_at=NULL, delete_warned_at=NULL")
+		return w.setStatus(ctx, s.ID, "running", ", suspended_at=NULL")
 
 	case ActStop:
 		if err := w.HV.Stop(ctx, s.Node, *s.VMID); err != nil {
@@ -238,12 +300,83 @@ func (w *Worker) handle(ctx context.Context, j job) error {
 		}
 		return w.setStatus(ctx, s.ID, "running", "")
 
+	case ActFirewall:
+		fw, err := LoadFirewall(ctx, w.DB, s.ID)
+		if err != nil {
+			return err
+		}
+		return w.HV.SetFirewall(ctx, s.Node, *s.VMID, s.IP, fw)
+
+	case ActBackup:
+		id := j.Payload.BackupID
+		b, err := w.backup(ctx, id, s.ID)
+		if err != nil {
+			return w.backupFailed(id, err)
+		}
+		info, err := w.HV.Backup(ctx, s.Node, *s.VMID, b.Storage, BackupTag(id))
+		if err != nil {
+			return w.backupFailed(id, err)
+		}
+		_, err = w.DB.Exec(ctx, `UPDATE backups SET status='ready', volid=$2, size_bytes=$3, finished_at=now(), error='' WHERE id=$1`,
+			id, info.Volid, info.Size)
+		return err
+
+	case ActRestore:
+		id := j.Payload.BackupID
+		b, err := w.backup(ctx, id, s.ID)
+		if err == nil && b.Volid == nil {
+			err = errors.New("bekap faýly ýok")
+		}
+		if err != nil {
+			_, _ = w.DB.Exec(context.Background(), `UPDATE backups SET status='ready' WHERE id=$1 AND status='restoring'`, id)
+			_ = w.setStatus(context.Background(), s.ID, w.actualStatus(s), "")
+			return err
+		}
+		// Ýalňyşlyk bolsa-da bekap ulanmaga taýýar galýar
+		defer func() {
+			_, _ = w.DB.Exec(context.Background(), `UPDATE backups SET status='ready' WHERE id=$1 AND status='restoring'`, id)
+		}()
+		if err := w.HV.RestoreBackup(ctx, s.Node, *s.VMID, *b.Volid, s.Storage); err != nil {
+			return w.fail(ctx, s, err)
+		}
+		// Bekapdaky firewall köne bolup biler: häzirki düzgünleri gaýtadan goýýarys
+		fw, err := LoadFirewall(ctx, w.DB, s.ID)
+		if err == nil {
+			err = w.HV.SetFirewall(ctx, s.Node, *s.VMID, s.IP, fw)
+		}
+		if err != nil {
+			return w.fail(ctx, s, fmt.Errorf("firewall: %w", err))
+		}
+		if _, err := w.DB.Exec(ctx, `UPDATE servers SET image_id=$2 WHERE id=$1`, s.ID, b.ImageID); err != nil {
+			return err
+		}
+		if err := w.HV.Start(ctx, s.Node, *s.VMID); err != nil {
+			_ = w.setStatus(context.Background(), s.ID, "stopped", "")
+			return fmt.Errorf("dikeldildi, ýöne başlamady: %w", err)
+		}
+		return w.setStatus(ctx, s.ID, "running", "")
+
+	case ActBackupDelete:
+		id := j.Payload.BackupID
+		b, err := w.backup(ctx, id, s.ID)
+		if err != nil {
+			return w.backupFailed(id, err)
+		}
+		if b.Volid != nil {
+			if err := w.HV.DeleteBackup(ctx, s.Node, *b.Volid); err != nil {
+				return w.backupFailed(id, err)
+			}
+		}
+		_, err = w.DB.Exec(ctx, `UPDATE backups SET status='deleted', finished_at=now() WHERE id=$1`, id)
+		return err
+
 	case ActDelete:
 		if s.VMID != nil {
 			if err := w.HV.Destroy(ctx, s.Node, *s.VMID); err != nil {
 				return err
 			}
 		}
+		w.deleteBackups(ctx, s)
 		tx, err := w.DB.Begin(ctx)
 		if err != nil {
 			return err
@@ -258,6 +391,16 @@ func (w *Worker) handle(ctx context.Context, j job) error {
 		return tx.Commit(ctx)
 	}
 	return fmt.Errorf("näbelli amal: %s", j.Action)
+}
+
+// actualStatus maşynyň hypervisor-daky hakyky ýagdaýyny (running | stopped) gaýtarýar.
+func (w *Worker) actualStatus(s srv) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if u, err := w.HV.Usage(ctx, s.Node, *s.VMID); err == nil && u.Status == "running" {
+		return "running"
+	}
+	return "stopped"
 }
 
 // fail döretmek ýa-da täzeden gurmak şowsuz bolanda maşyny "error" ýagdaýyna geçirýär.

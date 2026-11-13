@@ -21,7 +21,7 @@ export function useCrumbs(...parts: string[]) {
   useEffect(() => setCrumbs(parts), [key]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
-type NavItem = { href: string; label: string; icon: string; soon?: boolean };
+type NavItem = { href: string; label: string; icon: string; count?: number };
 type NavGroup = { group: string; icon: string; items: NavItem[] };
 const NAV: (NavItem | NavGroup)[] = [
   { href: "/dashboard", label: "Baş sahypa", icon: "home" },
@@ -30,11 +30,11 @@ const NAV: (NavItem | NavGroup)[] = [
     { href: "/ssh-keys", label: "SSH açarlar", icon: "key" },
     { href: "/plans", label: "Konfigurasiýalar", icon: "sliders" },
     { href: "/images", label: "Obrazlar", icon: "disk" },
-    { href: "/backups", label: "Bekaplar", icon: "backup", soon: true },
+    { href: "/backups", label: "Bekaplar", icon: "backup" },
   ]},
   { group: "Tor", icon: "net", items: [
-    { href: "/ips", label: "IP salgylar", icon: "net", soon: true },
-    { href: "/firewall", label: "Firewall", icon: "shield", soon: true },
+    { href: "/ips", label: "IP salgylar", icon: "net" },
+    { href: "/firewall", label: "Firewall", icon: "shield" },
   ]},
   { group: "Maliýe", icon: "wallet", items: [
     { href: "/billing", label: "Balans", icon: "wallet" },
@@ -48,11 +48,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [crumbs, setCrumbs] = useState<string[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [msg, setMsg] = useState("");
+  const [pending, setPending] = useState(0);
   const t = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await api<User>("/me"));
+      const u = await api<User>("/me");
+      setMe(u);
+      // Administrator üçin garaşylýan doldurma haýyşlarynyň sany menýuda görünýär
+      if (u.role === "admin") api<{ pending_topups: number }>("/admin/stats").then((s) => setPending(s.pending_topups)).catch(() => {});
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) router.replace("/login");
     }
@@ -80,7 +84,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const link = (it: NavItem, sub: boolean) => (
     <Link key={it.href + it.label} href={it.href} className={`${sub ? "sub " : ""}${active(it.href) ? "active" : ""}`}
       aria-current={active(it.href) ? "page" : undefined}>
-      <Icon name={it.icon} small={sub} />{it.label}{it.soon && <span className="soon">soň</span>}
+      <Icon name={it.icon} small={sub} />{it.label}
+      {!!it.count && <span className="count" aria-label={`${it.count} garaşylýan haýyş`}>{it.count}</span>}
     </Link>
   );
 
@@ -106,7 +111,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             )}
           </nav>
           <div className="sidebar-foot nav">
-            {me.role === "admin" && link({ href: "/admin", label: "Admin paneli", icon: "shield" }, false)}
+            {me.role === "admin" && link({ href: "/admin", label: "Admin paneli", icon: "shield", count: pending }, false)}
             <button type="button" className="nav-btn" onClick={logout}><Icon name="logout" />Çykmak</button>
           </div>
         </aside>
@@ -125,7 +130,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </nav>
             </div>
             <div className="top-actions">
-              <Link className="balance-pill" href="/billing" aria-label={`Balans ${money(me.balance)}, doldurmak`}>
+              <Link className="balance-pill" href="/billing#doldur" aria-label={`Balans ${money(me.balance)}, doldurmak`}>
                 <span style={{ color: me.balance < 0 ? "var(--danger)" : undefined }}>{money(me.balance)}</span>
                 <span className="plus"><Icon name="plus" small sw={2.6} /></span>
               </Link>
@@ -161,8 +166,8 @@ export function PageHead({ title, sub, children }: { title: string; sub?: React.
 
 export function Badge({ status }: { status: string }) {
   const map: Record<string, [string, string]> = {
-    running: ["IŞJEŇ", "badge-ok"], stopped: ["DURDURYLAN", "badge-off"], suspended: ["SAKLANAN", "badge-warn"],
-    provisioning: ["DÖREDILÝÄR", "badge-info"], reinstalling: ["TÄZEDEN GURULÝAR", "badge-info"],
+    running: ["IŞJEŇ", "badge-ok"], stopped: ["DURDURYLAN", "badge-off"], suspended: ["ÖÇÜRILEN", "badge-warn"],
+    provisioning: ["DÖREDILÝÄR", "badge-info"], reinstalling: ["TÄZEDEN GURULÝAR", "badge-info"], restoring: ["DIKELDILÝÄR", "badge-info"],
     deleting: ["POZULÝAR", "badge-warn"], error: ["ÝALŇYŞLYK", "badge-danger"],
     active: ["IŞJEŇ", "badge-ok"], pending: ["TASSYKLANMADYK", "badge-off"], blocked: ["BLOKLANAN", "badge-danger"],
   };

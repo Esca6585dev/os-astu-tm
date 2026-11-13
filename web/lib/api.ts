@@ -17,7 +17,31 @@ export type Server = {
 };
 export type SSHKey = { id: number; name: string; type: string; fingerprint: string; created_at: string; used_by: string[] };
 export type Tx = { id: number; type: string; amount: number; balance_after: number; note: string; server_id: number | null; created_at: string; user_email?: string };
-export type Balance = { balance: number; hourly: number; monthly_cap: number; month_used: number; days_left: number | null; billable_servers: number; account_no: string };
+export type Balance = { balance: number; hourly: number; monthly_cap: number; month_used: number; days_left: number | null; billable_servers: number; account_no: string; payment_info: string };
+
+export type FWRule = { direction: "in" | "out"; action: "ACCEPT" | "DROP"; proto: "" | "tcp" | "udp" | "icmp"; dport: string; addr: string; comment: string };
+export type Firewall = {
+  server_id: number; hostname: string; ip: string | null; status: string; busy: boolean; editable: boolean;
+  policy_in: "ACCEPT" | "DROP"; rules: FWRule[]; system_rules: FWRule[]; last_job_error: string | null;
+};
+export type Backup = {
+  id: number; server_id: number; hostname: string; note: string; status: string; size_bytes: number;
+  image: string; error: string; created_at: string; finished_at: string | null;
+};
+export type IPAddr = {
+  address: string; prefix: number; netmask: string; gateway: string; dns: string[];
+  server: { id: number; hostname: string; status: string }; firewall: { policy_in: string; rules: number };
+};
+export type Topup = {
+  id: number; amount: number; method: "bank" | "cash" | "card"; reference: string; comment: string; status: string;
+  admin_note: string; created_at: string; decided_at: string | null;
+  user_id?: number; user_email?: string; full_name?: string; account_no?: string; user_balance?: number;
+};
+export const METHOD: Record<string, string> = { bank: "Bank geçirimi", cash: "Kassa (nagt)", card: "Bank kartyndan" };
+export const TOPUP_STATUS: Record<string, [string, string]> = {
+  pending: ["GARAŞYLÝAR", "badge-warn"], approved: ["TASSYKLANDY", "badge-ok"],
+  rejected: ["RET EDILDI", "badge-danger"], cancelled: ["ÝATYRYLDY", "badge-off"],
+};
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -66,9 +90,10 @@ export const bytes = (n: number) => {
 export const STATUS: Record<string, { label: string; cls: string }> = {
   running: { label: "IŞJEŇ", cls: "badge-ok" },
   stopped: { label: "DURDURYLAN", cls: "badge-off" },
-  suspended: { label: "SAKLANAN", cls: "badge-warn" },
+  suspended: { label: "ÖÇÜRILEN", cls: "badge-warn" },
   provisioning: { label: "DÖREDILÝÄR", cls: "badge-info" },
   reinstalling: { label: "TÄZEDEN GURULÝAR", cls: "badge-info" },
+  restoring: { label: "DIKELDILÝÄR", cls: "badge-info" },
   deleting: { label: "POZULÝAR", cls: "badge-warn" },
   error: { label: "ÝALŇYŞLYK", cls: "badge-danger" },
 };

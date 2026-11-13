@@ -26,15 +26,15 @@ export default function Dashboard() {
         <Link className="btn" href="/machines/new"><Icon name="plus" small sw={2.4} />Täze maşyn</Link>
       </PageHead>
       <section className="grid grid-stats" aria-label="Görkezijiler">
-        <div className="card stat"><span className="label">Balans</span><span className="value">{money(me.balance)}</span><Link href="/billing">Doldurmak →</Link></div>
+        <div className="card stat"><span className="label">Balans</span><span className="value">{money(me.balance)}</span><Link href="/billing#doldur">Doldurmak →</Link></div>
         <div className="card stat"><span className="label">Işjeň maşynlar</span><span className="value">{running} <small>/ {servers?.length ?? 0}</small></span><span className="muted">{(servers?.length ?? 0) - running} başga ýagdaýda</span></div>
         <div className="card stat"><span className="label">Häzirki tutum</span><span className="value">{bal ? tmt(bal.hourly) : "—"} <small>TMT / sag</small></span><span className="muted">Aýlyk çäk {bal ? money(bal.monthly_cap) : "—"}</span></div>
         <div className="card stat"><span className="label">Şu aý tutulan</span><span className="value">{bal ? money(bal.month_used) : "—"}</span><span className="muted">{bal?.days_left != null ? `Balans ≈ ${bal.days_left} gün ýeter` : "Tölegli maşyn ýok"}</span></div>
       </section>
       {me.balance <= 0 && (servers?.length ?? 0) > 0 ? (
-        <div className="alert alert-warn"><Icon name="alert" /><span>Balansyňyz gutardy. Maşynlar saklanýar we 7 günden soň pozulýar.</span><Link href="/billing"><b>Balansy doldur</b></Link></div>
+        <div className="alert alert-warn"><Icon name="alert" /><span>Balansyňyz gutardy, serwerleriňiz öçürildi. Balansy dolduranyňyzda olar awtomatik açylar.</span><Link href="/billing#doldur"><b>Balansy doldur</b></Link></div>
       ) : (
-        <div className="alert alert-info"><Icon name="info" /><span>Balans 0 bolanda maşynlar awtomatik durdurylýar, 7 günden soň pozulýar.</span></div>
+        <div className="alert alert-info"><Icon name="info" /><span>Balans 0 bolanda serwerler awtomatik öçürilýär. Balans doldurylanda olar gaýtadan açylýar.</span></div>
       )}
       <div className="split">
         <section className="card main-col">

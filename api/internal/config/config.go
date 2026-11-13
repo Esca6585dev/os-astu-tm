@@ -37,36 +37,41 @@ type Config struct {
 	SMTPPass string
 	MailFrom string
 
-	SuspendDeleteAfter time.Duration
-	DevAutoVerify      bool
+	BackupStorage string // vzdump bekaplary üçin Proxmox storage (content: backup)
+	BackupLimit   int    // bir maşyn üçin iň köp bekap sany
+
+	PaymentInfo   string // balans sahypasynda görkezilýän töleg rekwizitleri
+	DevAutoVerify bool
 }
 
 func Load() Config {
 	return Config{
-		Env:                get("APP_ENV", "dev"),
-		HTTPAddr:           get("HTTP_ADDR", ":8080"),
-		DatabaseURL:        get("DATABASE_URL", "postgres://vps:vps@localhost:5432/vps?sslmode=disable"),
-		PublicURL:          strings.TrimRight(get("PUBLIC_URL", "http://localhost:3000"), "/"),
-		CookieSecure:       getBool("COOKIE_SECURE", false),
-		SessionTTL:         time.Duration(getInt("SESSION_DAYS", 30)) * 24 * time.Hour,
-		AdminEmail:         get("ADMIN_EMAIL", ""),
-		AdminPassword:      get("ADMIN_PASSWORD", ""),
-		Hypervisor:         get("HYPERVISOR", "fake"),
-		PVEURL:             strings.TrimRight(get("PVE_URL", ""), "/"),
-		PVETokenID:         get("PVE_TOKEN_ID", ""),
-		PVETokenSecret:     get("PVE_TOKEN_SECRET", ""),
-		PVEInsecureTLS:     getBool("PVE_INSECURE_TLS", false),
-		PVECAFile:          get("PVE_CA_FILE", ""),
-		PVEDisk:            get("PVE_DISK", "scsi0"),
-		PVEMinCreditHrs:    int64(getInt("MIN_CREDIT_HOURS", 24)),
-		PVEFirewall:        getBool("PVE_FIREWALL", true),
-		SMTPHost:           get("SMTP_HOST", ""),
-		SMTPPort:           getInt("SMTP_PORT", 587),
-		SMTPUser:           get("SMTP_USER", ""),
-		SMTPPass:           get("SMTP_PASS", ""),
-		MailFrom:           get("MAIL_FROM", "no-reply@os.astu.tm"),
-		SuspendDeleteAfter: time.Duration(getInt("SUSPEND_DELETE_DAYS", 7)) * 24 * time.Hour,
-		DevAutoVerify:      getBool("DEV_AUTO_VERIFY", false),
+		Env:             get("APP_ENV", "dev"),
+		HTTPAddr:        get("HTTP_ADDR", ":8080"),
+		DatabaseURL:     get("DATABASE_URL", "postgres://vps:vps@localhost:5432/vps?sslmode=disable"),
+		PublicURL:       strings.TrimRight(get("PUBLIC_URL", "http://localhost:3000"), "/"),
+		CookieSecure:    getBool("COOKIE_SECURE", false),
+		SessionTTL:      time.Duration(getInt("SESSION_DAYS", 30)) * 24 * time.Hour,
+		AdminEmail:      get("ADMIN_EMAIL", ""),
+		AdminPassword:   get("ADMIN_PASSWORD", ""),
+		Hypervisor:      get("HYPERVISOR", "fake"),
+		PVEURL:          strings.TrimRight(get("PVE_URL", ""), "/"),
+		PVETokenID:      get("PVE_TOKEN_ID", ""),
+		PVETokenSecret:  get("PVE_TOKEN_SECRET", ""),
+		PVEInsecureTLS:  getBool("PVE_INSECURE_TLS", false),
+		PVECAFile:       get("PVE_CA_FILE", ""),
+		PVEDisk:         get("PVE_DISK", "scsi0"),
+		PVEMinCreditHrs: int64(getInt("MIN_CREDIT_HOURS", 24)),
+		PVEFirewall:     getBool("PVE_FIREWALL", true),
+		SMTPHost:        get("SMTP_HOST", ""),
+		SMTPPort:        getInt("SMTP_PORT", 587),
+		SMTPUser:        get("SMTP_USER", ""),
+		SMTPPass:        get("SMTP_PASS", ""),
+		MailFrom:        get("MAIL_FROM", "no-reply@os.astu.tm"),
+		BackupStorage:   get("PVE_BACKUP_STORAGE", "local"),
+		BackupLimit:     getInt("BACKUP_LIMIT", 3),
+		PaymentInfo:     get("PAYMENT_INFO", ""),
+		DevAutoVerify:   getBool("DEV_AUTO_VERIFY", false),
 	}
 }
 

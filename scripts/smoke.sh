@@ -63,11 +63,53 @@ req user POST "/servers/$SID/reset-password"; expect 202 "root parol"; PW=$(jq_ 
 wait_status "$SID" running
 req user POST "/servers/$SID/reinstall" "{\"image_id\":$IMG}"; expect 202 "OS täzeden gurmak"; wait_status "$SID" running && ok "täzeden guruldy"
 
+echo "== Firewall"
+req user GET "/servers/$SID/firewall"; expect 200 "firewall okamak"
+[ "$(jq_ "d['policy_in']")" = "ACCEPT" ] && [ "$(jq_ "len(d['rules'])")" = "0" ] && [ "$(jq_ "d['system_rules'][0]['dport']")" = "25" ] \
+  && ok "başda: hemmesine rugsat we SMTP (25) bloky" || fail "firewall $(body)"
+req user PUT "/servers/$SID/firewall" '{"policy_in":"DROP","rules":[{"direction":"in","action":"ACCEPT","proto":"icmp","dport":"22"}]}'; expect 422 "ICMP bilen port → 422"
+req user PUT "/servers/$SID/firewall" '{"policy_in":"DROP","rules":[{"direction":"in","action":"ACCEPT","proto":"tcp","dport":"70000"}]}'; expect 422 "nädogry port → 422"
+req user PUT "/servers/$SID/firewall" '{"policy_in":"DROP","rules":[{"direction":"in","action":"ACCEPT","proto":"tcp","dport":"22","addr":"10.0.0.0/8","comment":"SSH"},{"direction":"in","action":"ACCEPT","proto":"tcp","dport":"80,443"}]}'; expect 202 "firewall ýatda saklamak"
+wait_status "$SID" running
+req user GET "/servers/$SID/firewall"
+[ "$(jq_ "d['policy_in']")" = "DROP" ] && [ "$(jq_ "len(d['rules'])")" = "2" ] && [ "$(jq_ "d['rules'][1]['dport']")" = "80,443" ] && [ "$(jq_ "d['last_job_error']")" = "None" ] \
+  && ok "firewall ulanyldy: DROP we 2 düzgün" || fail "firewall $(body)"
+
+echo "== IP salgylar"
+req user GET /ips; expect 200 "IP sanawy"
+[ "$(jq_ "d[0]['address']")" = "203.0.113.2" ] && [ "$(jq_ "d[0]['netmask']")" = "255.255.255.240" ] && [ "$(jq_ "d[0]['firewall']['rules']")" = "2" ] \
+  && ok "203.0.113.2, maska 255.255.255.240, firewall 2 düzgün" || fail "ips $(body)"
+
+echo "== Bekaplar"
+wait_backup() { # id status ("gone" = sanawda ýok)
+  for _ in $(seq 1 40); do
+    req user GET /backups; b=$(jq_ "next((x['status'] for x in d['backups'] if x['id']==$1), 'gone')")
+    [ "$b" = "$2" ] && return 0; sleep 1
+  done; fail "bekap $1 status=$b, garaşylýan $2"
+}
+req user POST "/servers/$SID/backups" '{"note":"ilkinji bekap"}'; expect 202 "bekap almak"; BID=$(jq_ "d['id']")
+wait_backup "$BID" ready && ok "bekap taýýar"
+[ "$(jq_ "[x['size_bytes'] for x in d['backups'] if x['id']==$BID][0] > 0")" = "True" ] && ok "bekabyň ölçegi bar"
+wait_status "$SID" running
+req user POST "/backups/$BID/restore"; expect 202 "bekapdan dikeltmek"
+req user GET "/servers/$SID"; [ "$(jq_ "d['status']")" = "restoring" ] && ok "ýagdaýy: restoring" || fail "status $(jq_ "d['status']")"
+wait_status "$SID" running && ok "dikeldildi, maşyn running"
+wait_backup "$BID" ready
+req user POST "/servers/$SID/backups" '{}'; expect 202 "2-nji bekap"; B2=$(jq_ "d['id']"); wait_status "$SID" running
+req user POST "/servers/$SID/backups" '{}'; expect 202 "3-nji bekap"; wait_status "$SID" running
+req user POST "/servers/$SID/backups" '{}'; expect 409 "bekap çägi (3) → 409"
+req user DELETE "/backups/$BID"; expect 202 "bekaby pozmak"
+wait_backup "$BID" gone && ok "bekap pozuldy"
+wait_status "$SID" running
+
 echo "== Başga ulanyjy (IDOR)"
 E2="other$RANDOM@mysal.tm"
 req other POST /auth/register "{\"email\":\"$E2\",\"password\":\"ulanyjy-parol-2\"}"; req other POST /auth/login "{\"email\":\"$E2\",\"password\":\"ulanyjy-parol-2\"}"
 req other GET "/servers/$SID"; expect 404 "başga ulanyjynyň maşyny görünmeýär"
 req other POST "/servers/$SID/stop"; expect 404 "başga ulanyjynyň maşynyny durdurup bolmaýar"
+req other GET "/servers/$SID/firewall"; expect 404 "başga ulanyjynyň firewall-y görünmeýär"
+req other POST "/backups/$B2/restore"; expect 404 "başga ulanyjynyň bekabyny dikeldip bolmaýar"
+req other DELETE "/backups/$B2"; expect 404 "başga ulanyjynyň bekabyny pozup bolmaýar"
 
 echo "== Billing (sagatlar yza süýşürilýär, worker her minutda hasaplaýar)"
 $PSQL -qtAc "UPDATE servers SET created_at = date_trunc('hour', now()) - interval '3 hours' WHERE id=$SID" >/dev/null
@@ -87,12 +129,32 @@ req admin POST /admin/users/$UID_/topup '{"amount":100,"note":"çek №2"}'; exp
 for _ in $(seq 1 75); do req user GET "/servers/$SID"; [ "$(jq_ "d['status']")" = "running" ] && break; sleep 1; done
 [ "$(jq_ "d['status']")" = "running" ] && ok "balans > 0 → awtomatik running" || fail "status $(jq_ "d['status']")"
 
+echo "== Balans doldurma haýyşy"
+req user POST /topups '{"amount":0,"method":"bank","reference":"x"}'; expect 422 "nädogry möçber → 422"
+req user POST /topups '{"amount":50,"method":"bank","reference":"  "}'; expect 422 "çek belgisi hökmany → 422"
+req user POST /topups '{"amount":250.5,"method":"bank","reference":"P-77","comment":"Halkbank"}'; expect 201 "haýyş ibermek"; T1=$(jq_ "d['id']")
+req user GET /topups; [ "$(jq_ "d[0]['status']")" = "pending" ] && [ "$(jq_ "d[0]['amount']")" = "25050" ] && ok "haýyş garaşylýar" || fail "topups $(body)"
+req user GET /admin/topups; expect 403 "ulanyjy admin sanawyny görüp bilmeýär"
+req admin GET /admin/topups; [ "$(jq_ "any(x['id']==$T1 for x in d)")" = "True" ] && ok "admin haýyşy görýär"
+req admin POST "/admin/topups/$T1/approve" '{}'; expect 200 "admin tassyklaýar"
+req admin POST "/admin/topups/$T1/approve" '{}'; expect 409 "iki gezek tassyklap bolmaýar"
+req user GET "/me/transactions?type=topup"
+[ "$(jq_ "d[0]['amount']")" = "25050" ] && [ "$(jq_ "'#$T1 ' in d[0]['note'] and 'P-77' in d[0]['note']")" = "True" ] && ok "balansa +250.50 TMT goşuldy" || fail "tx $(body)"
+req user POST /topups '{"amount":10,"method":"cash","reference":"K-1"}'; T2=$(jq_ "d['id']")
+req admin POST "/admin/topups/$T2/reject" '{"note":""}'; expect 422 "sebäpsiz ret edip bolmaýar"
+req admin POST "/admin/topups/$T2/reject" '{"note":"Töleg tapylmady"}'; expect 200 "admin ret edýär"
+req user POST /topups '{"amount":10,"method":"card","reference":"C-1"}'; T3=$(jq_ "d['id']")
+req other POST "/topups/$T3/cancel"; expect 404 "başga ulanyjynyň haýyşyny ýatyryp bolmaýar"
+req user POST "/topups/$T3/cancel"; expect 200 "ulanyjy haýyşy ýatyrýar"
+req user GET /topups; [ "$(jq_ "' '.join(x['status'] for x in d[:3])")" = "cancelled rejected approved" ] && ok "ýagdaýlar: ýatyrylan, ret edilen, tassyklanan"
+
 echo "== Pozmak"
 wait_status "$SID" running
 req user DELETE "/servers/$SID"; expect 202 "pozmak"
 for _ in $(seq 1 30); do s=$($PSQL -qtAc "SELECT status FROM servers WHERE id=$SID"); [ "$s" = "deleted" ] && break; sleep 1; done
 [ "$s" = "deleted" ] && ok "deleted" || fail "status $s"
 [ "$($PSQL -qtAc "SELECT count(*) FROM ip_addresses WHERE address='203.0.113.2' AND server_id IS NULL")" = "1" ] && ok "IP boşadyldy"
+[ "$($PSQL -qtAc "SELECT count(*) FROM backups WHERE server_id=$SID AND status<>'deleted'")" = "0" ] && ok "maşynyň bekaplary hem pozuldy" || fail "bekaplar galdy"
 req admin GET /admin/audit; [ "$(jq_ "len(d)")" -gt 5 ] && ok "audit žurnaly ýazylýar"
 
 echo; echo "Ähli $pass barlag geçdi."

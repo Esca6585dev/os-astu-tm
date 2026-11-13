@@ -1,10 +1,12 @@
-// Package billing sagatlaýyn tutum, aýlyk çäk, saklamak (suspend) we pozmak.
+// Package billing sagatlaýyn tutum, aýlyk çäk we balans gutaranda maşyny öçürmek (suspend).
 //
 // Düzgünler:
 //   - Ähli mukdarlar teňňede (int64). 1 aý = 720 sagat.
 //   - Her sagat: charge = min(price, round(price*n/720)) − şu aý eýýäm tutulan,
 //     bu ýerde n — şu aýda hasaplanan sagatlaryň sany (şu sagat bilen).
 //   - server_usage (server_id, hour) PRIMARY KEY bir sagadyň iki gezek tutulmagynyň öňüni alýar.
+//   - Balans 0-dan aşak düşende maşynlar öçürilýär (suspended, pul tutulmaýar) we
+//     balans doldurylýança öçük durýar. Maşynlar awtomatik pozulmaýar.
 package billing
 
 import (
@@ -134,29 +136,21 @@ func (b *Billing) chargeServer(ctx context.Context, serverID int64, hour time.Ti
 	return tx.Commit(ctx)
 }
 
-// Enforce: balansy gutaranlary saklamak, doldurylanlary başlatmak, köne saklananlary pozmak, duýduryşlar.
+// Enforce: balansy gutaranlaryň maşynlaryny öçürmek, doldurylanlary açmak, duýduryşlar.
 func (b *Billing) Enforce(ctx context.Context) error {
-	// 1) Balans < 0 → saklamak
+	// 1) Balans < 0 → öçürmek
 	if err := b.enqueueFor(ctx, `
 		SELECT s.id FROM servers s JOIN users u ON u.id=s.user_id
 		WHERE u.balance < 0 AND s.status IN ('running','stopped') AND NOT s.busy AND s.deleted_at IS NULL`, jobs.ActSuspend); err != nil {
 		return err
 	}
-	// 2) Balans > 0 → saklanan maşynlary başlatmak
+	// 2) Balans > 0 → öçürilen maşynlary açmak
 	if err := b.enqueueFor(ctx, `
 		SELECT s.id FROM servers s JOIN users u ON u.id=s.user_id
 		WHERE u.balance > 0 AND u.status='active' AND s.status='suspended' AND NOT s.busy`, jobs.ActUnsuspend); err != nil {
 		return err
 	}
-	// 3) Uzak wagt saklanan → pozmak
-	deleteBefore := time.Now().Add(-b.Cfg.SuspendDeleteAfter)
-	if err := b.enqueueFor(ctx, `
-		SELECT id FROM servers WHERE status='suspended' AND NOT busy AND suspended_at < $1`, jobs.ActDelete, deleteBefore); err != nil {
-		return err
-	}
-	// 4) Pozmazdan 2 gün öň duýduryş
-	b.warnDeletes(ctx, deleteBefore.Add(48*time.Hour))
-	// 5) Az balans duýduryşy
+	// 3) Az balans duýduryşy
 	b.warnLowBalance(ctx)
 	return nil
 }
@@ -190,25 +184,6 @@ func (b *Billing) enqueueFor(ctx context.Context, query string, action string, a
 	return nil
 }
 
-func (b *Billing) warnDeletes(ctx context.Context, warnBefore time.Time) {
-	rows, err := b.DB.Query(ctx, `
-		UPDATE servers s SET delete_warned_at=now() FROM users u
-		WHERE u.id=s.user_id AND s.status='suspended' AND s.delete_warned_at IS NULL AND s.suspended_at < $1
-		RETURNING u.email, s.hostname`, warnBefore)
-	if err != nil {
-		slog.Error("warn deletes", "err", err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var email, host string
-		if rows.Scan(&email, &host) == nil {
-			_ = b.Mail.Send(email, "Maşynyňyz 2 günden pozular: "+host,
-				fmt.Sprintf("Balansyňyz gutaranlygy sebäpli %s maşyny saklanýar.\nBalansy 2 günüň dowamynda doldurmasaňyz, maşyn we onuň diski pozular.\n\n%s/billing", host, b.Cfg.PublicURL))
-		}
-	}
-}
-
 func (b *Billing) warnLowBalance(ctx context.Context) {
 	rows, err := b.DB.Query(ctx, `
 		WITH rate AS (
@@ -229,7 +204,7 @@ func (b *Billing) warnLowBalance(ctx context.Context) {
 		var bal int64
 		if rows.Scan(&email, &bal) == nil {
 			_ = b.Mail.Send(email, "Balansyňyz az galdy",
-				fmt.Sprintf("Balansyňyz %s TMT. Ol 24 sagatdan az ýeter.\nBalans gutarsa, maşynlaryňyz durdurylar.\n\n%s/billing", FormatTMT(bal), b.Cfg.PublicURL))
+				fmt.Sprintf("Balansyňyz %s TMT. Ol 24 sagatdan az ýeter.\nBalans gutarsa, serwerleriňiz öçüriler we balans doldurylanda gaýtadan açylar.\n\n%s/billing", FormatTMT(bal), b.Cfg.PublicURL))
 		}
 	}
 }

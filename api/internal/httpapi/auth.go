@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/mail"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
@@ -24,9 +25,14 @@ func (a *API) setSession(c *fiber.Ctx, userID int64) error {
 	return nil
 }
 
+// truncate setiri iň köp n baýta çenli gysgaldýar, köp baýtly harpy (ň, ş, ä…) ortasyndan bölmeýär.
 func truncate(s string, n int) string {
-	if len(s) > n {
-		return s[:n]
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
 	}
 	return s
 }

@@ -124,7 +124,11 @@ func (p *Proxmox) waitTask(ctx context.Context, node, upid string) error {
 		return nil
 	}
 	path := fmt.Sprintf("/nodes/%s/tasks/%s/status", url.PathEscape(node), url.PathEscape(upid))
+	// Bekap we dikeltmek uzak dowam edip biler: worker-iň job wagtyna (ctx) garaşýarys
 	deadline := time.Now().Add(15 * time.Minute)
+	if d, ok := ctx.Deadline(); ok {
+		deadline = d
+	}
 	for time.Now().Before(deadline) {
 		var st struct {
 			Status     string `json:"status"`
@@ -243,8 +247,8 @@ func (p *Proxmox) Create(ctx context.Context, s VMSpec) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	if p.firewall {
-		if err := p.applyFirewall(ctx, s); err != nil {
+	if p.firewall || s.Firewall.Custom() {
+		if err := p.SetFirewall(ctx, s.Node, s.VMID, s.IP, s.Firewall); err != nil {
 			return fmt.Errorf("firewall: %w", err)
 		}
 	}
@@ -266,25 +270,136 @@ func (p *Proxmox) Create(ctx context.Context, s VMSpec) error {
 	return nil
 }
 
-// applyFirewall: maşyn diňe öz IP-sini ulanyp biler (ipfilter), MAC çalşyp bilmez,
-// çykýan SMTP (25) ýapyk — spam we IP ogurlygyna garşy. Datacenter firewall açyk bolmaly.
-func (p *Proxmox) applyFirewall(ctx context.Context, s VMSpec) error {
-	base := vmPath(s.Node, s.VMID, "/firewall")
-	if err := p.do(ctx, http.MethodPut, base+"/options", url.Values{
-		"enable": {"1"}, "ipfilter": {"1"}, "macfilter": {"1"}, "dhcp": {"0"}, "ndp": {"0"}, "radv": {"0"},
-		"policy_in": {"ACCEPT"}, "policy_out": {"ACCEPT"},
-	}, nil); err != nil {
+// SetFirewall VM firewall-ynyň ähli düzgünlerini çalyşýar. PVE_FIREWALL=true bolanda goşmaça:
+// maşyn diňe öz IP-sini ulanyp biler (ipfilter), MAC çalşyp bilmez we çykýan SMTP (25) ýapyk.
+// Düzgünler diňe Datacenter firewall açyk bolanda işleýär.
+func (p *Proxmox) SetFirewall(ctx context.Context, node string, vmid int, ip string, fw Firewall) error {
+	base := vmPath(node, vmid, "/firewall")
+	if p.firewall && ip != "" {
+		if err := p.do(ctx, http.MethodPost, base+"/ipset", url.Values{"name": {"ipfilter-net0"}}, nil); err != nil && !strings.Contains(err.Error(), "already exist") {
+			return err
+		}
+		if err := p.do(ctx, http.MethodPost, base+"/ipset/ipfilter-net0", url.Values{"cidr": {ip}}, nil); err != nil && !strings.Contains(err.Error(), "already exist") {
+			return err
+		}
+	}
+
+	// Köne düzgünleri pozmak: her gezek 0-njy düzgüni pozýarys, galanlary ýokary süýşýär
+	var old []struct {
+		Pos int `json:"pos"`
+	}
+	if err := p.do(ctx, http.MethodGet, base+"/rules", nil, &old); err != nil {
 		return err
 	}
-	if err := p.do(ctx, http.MethodPost, base+"/ipset", url.Values{"name": {"ipfilter-net0"}}, nil); err != nil && !strings.Contains(err.Error(), "already exist") {
+	for range old {
+		if err := p.do(ctx, http.MethodDelete, base+"/rules/0", nil, nil); err != nil {
+			return fmt.Errorf("köne düzgün: %w", err)
+		}
+	}
+
+	rules := fw.Rules
+	if p.firewall {
+		rules = append([]FWRule{SMTPBlock}, rules...)
+	}
+	// Proxmox täze düzgüni sanawyň başyna goşýar, şonuň üçin aşakdan ýokary goşýarys
+	for i := len(rules) - 1; i >= 0; i-- {
+		r := rules[i]
+		form := url.Values{"type": {r.Direction}, "action": {r.Action}, "enable": {"1"}}
+		if r.Proto != "" {
+			form.Set("proto", r.Proto)
+		}
+		if r.Dport != "" {
+			form.Set("dport", r.Dport)
+		}
+		if r.Addr != "" {
+			if r.Direction == "out" {
+				form.Set("dest", r.Addr)
+			} else {
+				form.Set("source", r.Addr)
+			}
+		}
+		if r.Comment != "" {
+			form.Set("comment", r.Comment)
+		}
+		if err := p.do(ctx, http.MethodPost, base+"/rules", form, nil); err != nil {
+			return fmt.Errorf("düzgün %d: %w", i+1, err)
+		}
+	}
+
+	// Syýasat iň soňunda: täze düzgünler goşulmanka DROP goýulsa, SSH wagtlaýyn ýapylyp biler
+	policy := fw.PolicyIn
+	if policy == "" {
+		policy = "ACCEPT"
+	}
+	opts := url.Values{"enable": {"1"}, "policy_in": {policy}, "policy_out": {"ACCEPT"}, "dhcp": {"0"}, "ndp": {"0"}, "radv": {"0"}}
+	if p.firewall {
+		opts.Set("ipfilter", "1")
+		opts.Set("macfilter", "1")
+	}
+	return p.do(ctx, http.MethodPut, base+"/options", opts, nil)
+}
+
+// Backup vzdump bilen doly bekap alýar (snapshot režimi: maşyn işläp durup biler).
+// remove=0: storage-yň prune sazlamasy ulanyjynyň beýleki bekaplaryny pozmasyn.
+func (p *Proxmox) Backup(ctx context.Context, node string, vmid int, storage, tag string) (BackupInfo, error) {
+	started := time.Now()
+	form := url.Values{
+		"vmid": {strconv.Itoa(vmid)}, "storage": {storage}, "mode": {"snapshot"},
+		"compress": {"zstd"}, "remove": {"0"}, "notes-template": {tag},
+	}
+	if err := p.task(ctx, node, http.MethodPost, fmt.Sprintf("/nodes/%s/vzdump", url.PathEscape(node)), form); err != nil {
+		return BackupInfo{}, err
+	}
+	var list []struct {
+		Volid string `json:"volid"`
+		Size  int64  `json:"size"`
+		Ctime int64  `json:"ctime"`
+		Notes string `json:"notes"`
+	}
+	if err := p.do(ctx, http.MethodGet, fmt.Sprintf("/nodes/%s/storage/%s/content", url.PathEscape(node), url.PathEscape(storage)),
+		url.Values{"content": {"backup"}, "vmid": {strconv.Itoa(vmid)}}, &list); err != nil {
+		return BackupInfo{}, fmt.Errorf("bekaplaryň sanawy: %w", err)
+	}
+	// Ilki bellik boýunça, tapylmasa iň täze faýly alýarys
+	best := -1
+	for i, b := range list {
+		if strings.TrimSpace(b.Notes) == tag {
+			return BackupInfo{Volid: b.Volid, Size: b.Size}, nil
+		}
+		if b.Ctime >= started.Add(-2*time.Minute).Unix() && (best < 0 || b.Ctime > list[best].Ctime) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return BackupInfo{}, errors.New("vzdump gutardy, ýöne bekap faýly storage-da tapylmady")
+	}
+	return BackupInfo{Volid: list[best].Volid, Size: list[best].Size}, nil
+}
+
+// RestoreBackup maşyny durdurýar we şol VMID-e bekapdan dikeldýär (diskler we konfigurasiýa çalşylýar).
+func (p *Proxmox) RestoreBackup(ctx context.Context, node string, vmid int, volid, storage string) error {
+	if err := p.Stop(ctx, node, vmid); err != nil && !isMissing(err) {
+		return fmt.Errorf("stop: %w", err)
+	}
+	form := url.Values{
+		"vmid": {strconv.Itoa(vmid)}, "archive": {volid}, "force": {"1"}, "unique": {"0"}, "storage": {storage},
+	}
+	if err := p.task(ctx, node, http.MethodPost, fmt.Sprintf("/nodes/%s/qemu", url.PathEscape(node)), form); err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
+	return nil
+}
+
+func (p *Proxmox) DeleteBackup(ctx context.Context, node, volid string) error {
+	storage, _, ok := strings.Cut(volid, ":")
+	if !ok {
+		return fmt.Errorf("nädogry bekap ady: %s", volid)
+	}
+	path := fmt.Sprintf("/nodes/%s/storage/%s/content/%s", url.PathEscape(node), url.PathEscape(storage), url.PathEscape(volid))
+	if err := p.task(ctx, node, http.MethodDelete, path, nil); err != nil && !isMissing(err) {
 		return err
 	}
-	if err := p.do(ctx, http.MethodPost, base+"/ipset/ipfilter-net0", url.Values{"cidr": {s.IP}}, nil); err != nil && !strings.Contains(err.Error(), "already exist") {
-		return err
-	}
-	return p.do(ctx, http.MethodPost, base+"/rules", url.Values{
-		"type": {"out"}, "action": {"DROP"}, "proto": {"tcp"}, "dport": {"25"}, "enable": {"1"}, "comment": {"SMTP ýapyk (panel)"},
-	}, nil)
+	return nil
 }
 
 func (p *Proxmox) Start(ctx context.Context, node string, vmid int) error {

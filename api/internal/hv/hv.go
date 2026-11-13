@@ -25,6 +25,34 @@ type VMSpec struct {
 	DNS           string // "8.8.8.8 1.1.1.1"
 	Password      string // boş bolup biler
 	SSHKeys       []string
+	Firewall      Firewall
+}
+
+// FWRule — ulanyjynyň firewall düzgüni (Proxmox VM firewall).
+type FWRule struct {
+	Direction string `json:"direction"` // in | out
+	Action    string `json:"action"`    // ACCEPT | DROP
+	Proto     string `json:"proto"`     // "" (hemmesi) | tcp | udp | icmp
+	Dport     string `json:"dport"`     // "22", "80,443", "8000:8100"
+	Addr      string `json:"addr"`      // in: çeşme, out: barýan ýeri (IP ýa-da CIDR), boş = islendik
+	Comment   string `json:"comment"`
+}
+
+// Firewall — maşynyň doly firewall sazlamasy.
+type Firewall struct {
+	PolicyIn string   // ACCEPT | DROP: hiç bir düzgüne gabat gelmeýän gelýän trafik
+	Rules    []FWRule // ýokardan aşak barlanýar
+}
+
+// Custom ulanyjy firewall-y üýtgedendigini görkezýär.
+func (f Firewall) Custom() bool { return f.PolicyIn == "DROP" || len(f.Rules) > 0 }
+
+// SMTPBlock panel her maşyna goýýan we ulanyjynyň aýryp bilmeýän düzgüni (spam garşy).
+var SMTPBlock = FWRule{Direction: "out", Action: "DROP", Proto: "tcp", Dport: "25", Comment: "SMTP ýapyk (panel)"}
+
+type BackupInfo struct {
+	Volid string // storage:backup/vzdump-qemu-...
+	Size  int64
 }
 
 type Usage struct {
@@ -53,4 +81,12 @@ type Hypervisor interface {
 	// Destroy maşyny durdurýar we diskleri bilen pozýar.
 	Destroy(ctx context.Context, node string, vmid int) error
 	Usage(ctx context.Context, node string, vmid int) (Usage, error)
+	// SetFirewall maşynyň firewall düzgünlerini we syýasatyny doly çalyşýar.
+	SetFirewall(ctx context.Context, node string, vmid int, ip string, fw Firewall) error
+	// Backup maşynyň doly bekabyny (vzdump) storage-a ýazýar. tag bekaba bellik hökmünde goşulýar.
+	Backup(ctx context.Context, node string, vmid int, storage, tag string) (BackupInfo, error)
+	// RestoreBackup maşyny durdurýar we ony bekapdan dikeldýär. Maşyn durdurylan galýar.
+	RestoreBackup(ctx context.Context, node string, vmid int, volid, storage string) error
+	// DeleteBackup bekap faýlyny pozýar (ýok bolsa ýalňyşlyk däl).
+	DeleteBackup(ctx context.Context, node, volid string) error
 }
